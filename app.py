@@ -2,94 +2,92 @@ import streamlit as st
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
+from datetime import datetime, timedelta
 import time
-from datetime import datetime
 
-# ページ設定
-st.set_page_config(page_title="SNS画像バズ・モニター", layout="wide", page_icon="📸")
+# --- ページ設定 ---
+st.set_page_config(page_title="Poisdex 投稿アーカイブ", layout="wide", page_icon="📊")
 
-# デザイン設定（画像表示用に最適化）
+# X（Twitter）風のダークモード・クリーンデザイン
 st.markdown("""
     <style>
-    .stApp { background-color: #f0f2f5; }
-    .tweet-container {
+    .stApp { background-color: #f7f9f9; }
+    .tweet-box {
         background-color: white;
-        border-radius: 15px;
+        border: 1px solid #e1e8ed;
+        border-radius: 16px;
         padding: 20px;
         margin-bottom: 20px;
-        border: 1px solid #ddd;
-        max-width: 700px;
+        max-width: 600px;
         margin-left: auto;
         margin-right: auto;
+        transition: 0.3s;
     }
-    .tweet-text { font-size: 1.1em; color: #1c1e21; line-height: 1.6; white-space: pre-wrap; margin-bottom: 15px; }
-    .tweet-img { width: 100%; border-radius: 10px; margin-top: 10px; border: 1px solid #eee; }
-    .status-bar { padding: 10px; border-radius: 10px; background: #fff; margin-bottom: 20px; border-left: 5px solid #1da1f2; text-align: center; }
+    .tweet-box:hover { background-color: #f8f8f8; border-color: #ccc; }
+    .user-info { font-weight: bold; color: #0f1419; margin-bottom: 5px; }
+    .user-id { color: #536471; font-weight: normal; font-size: 0.9em; }
+    .tweet-text { font-size: 1.1em; color: #0f1419; line-height: 1.5; white-space: pre-wrap; }
+    .tweet-footer { margin-top: 12px; color: #536471; font-size: 0.85em; border-top: 1px solid #eff3f4; padding-top: 10px; }
     </style>
     """, unsafe_allow_html=True)
 
-st.title("📸 リアルタイム・画像付きバズ監視")
+st.title("📊 @poisdex 実績投稿ギャラリー")
+st.caption("指定した期間・反応数に基づき、過去の成果を抽出します")
 
-# サイドバー
-st.sidebar.header("表示設定")
-search_keyword = st.sidebar.text_input("検索コマンド", "の min_faves:1000")
-update_interval = st.sidebar.slider("自動更新 (秒)", 30, 300, 60)
+# --- サイドバーの設定 ---
+st.sidebar.header("🔍 フィルター設定")
+MY_X_ID = "poisdex"
 
-def get_trends(keyword):
-    url = f"https://search.yahoo.co.jp/realtime/search?p={keyword}"
-    headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+# 日付範囲の選択
+col_date1, col_date2 = st.sidebar.columns(2)
+start_date = col_date1.date_input("開始日", datetime.now() - timedelta(days=180))
+end_date = col_date2.date_input("終了日", datetime.now())
+
+# いいね数のスライダー
+min_faves = st.sidebar.slider("最低いいね数", 0, 1000, 50)
+
+# 表示件数
+limit = st.sidebar.selectbox("表示件数", [5, 10, 20, 50], index=1)
+
+# --- データ取得 ---
+def fetch_my_best_posts():
+    # 検索コマンドを組み立て
+    query = f"from:{MY_X_ID} min_faves:{min_faves} since:{start_date} until:{end_date}"
+    url = f"https://search.yahoo.co.jp/realtime/search?p={query}"
+    
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
     
     try:
         res = requests.get(url, headers=headers)
         soup = BeautifulSoup(res.text, "html.parser")
-        items = []
         
-        # 投稿のひとかたまり（article等）を取得
-        posts = soup.find_all(["article", "div"], class_=lambda x: x and "Tweet_body" in x)
+        # Yahoo!の構造から投稿本文を取得
+        posts = soup.find_all(["p", "span"], class_=lambda x: x and ("Tweet_body" in x or "Content" in x))
         
-        # クラス名で見つからない場合のバックアップ
         if not posts:
-            posts = soup.select('li.Tweet')
+            st.warning("条件に一致する投稿が見つかりませんでした。")
+            return
 
-        for post in posts[:10]:
-            # テキスト取得
-            text_elem = post.find(["p", "span"], class_=lambda x: x and "Tweet_body" in x)
-            text = text_elem.get_text() if text_elem else ""
-            
-            # 画像URLの取得（imgタグを探す）
-            img_tag = post.find("img", src=lambda x: x and ("twimg.com" in x or "yjimage" in x))
-            img_url = img_tag["src"] if img_tag else None
-
-            if len(text) > 5:
-                items.append({
-                    "時刻": datetime.now().strftime("%H:%M"),
-                    "内容": text,
-                    "画像": img_url
-                })
-        return items
-    except:
-        return []
-
-# 表示エリア
-placeholder = st.empty()
-
-while True:
-    with placeholder.container():
-        posts_data = get_trends(search_keyword)
-        st.markdown(f'<div class="status-bar">最終更新: {datetime.now().strftime("%H:%M:%S")} | 注目投稿: {len(posts_data)}件</div>', unsafe_allow_html=True)
+        st.subheader(f"✨ 条件に一致する投稿（上位 {min(len(posts), limit)} 件）")
         
-        if posts_data:
-            for p in posts_data:
-                # HTML組み立て
-                img_html = f'<img src="{p["画像"]}" class="tweet-img">' if p["画像"] else ""
+        for post in posts[:limit]:
+            text = post.get_text()
+            if len(text) > 5:
+                # 投稿カードの生成
                 st.markdown(f"""
-                <div class="tweet-container">
-                    <div style="color: #657786; font-size: 0.8em; margin-bottom: 5px;">🕒 {p['時刻']}</div>
-                    <div class="tweet-text">{p['内容']}</div>
-                    {img_html}
+                <div class="tweet-box">
+                    <div class="user-info">poisdex <span class="user-id">@poisdex</span></div>
+                    <div class="tweet-text">{text}</div>
+                    <div class="tweet-footer">📊 この期間の成果投稿</div>
                 </div>
                 """, unsafe_allow_html=True)
-        else:
-            st.info("条件に合う投稿を探索中...")
-            
-    time.sleep(update_interval)
+                
+    except Exception as e:
+        st.error(f"データの取得中にエラーが発生しました。")
+
+# --- 実行 ---
+if st.sidebar.button("この条件で抽出実行"):
+    with st.spinner('取得中...'):
+        fetch_my_best_posts()
+else:
+    st.info("サイドバーの「抽出実行」ボタンを押すと表示が始まります。")
