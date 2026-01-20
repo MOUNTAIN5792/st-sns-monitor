@@ -6,9 +6,9 @@ import time
 from datetime import datetime
 
 # ページ設定
-st.set_page_config(page_title="SNSバズ・モニター", layout="wide", page_icon="✨")
+st.set_page_config(page_title="SNS画像バズ・モニター", layout="wide", page_icon="📸")
 
-# デザインをSNSのタイムライン風にするCSS
+# デザイン設定（画像表示用に最適化）
 st.markdown("""
     <style>
     .stApp { background-color: #f0f2f5; }
@@ -16,17 +16,19 @@ st.markdown("""
         background-color: white;
         border-radius: 15px;
         padding: 20px;
-        margin-bottom: 15px;
+        margin-bottom: 20px;
         border: 1px solid #ddd;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.02);
+        max-width: 700px;
+        margin-left: auto;
+        margin-right: auto;
     }
-    .tweet-time { color: #657786; font-size: 0.8em; margin-bottom: 8px; }
-    .tweet-text { font-size: 1.1em; color: #1c1e21; line-height: 1.6; white-space: pre-wrap; }
-    .status-bar { padding: 10px; border-radius: 10px; background: #fff; margin-bottom: 20px; border-left: 5px solid #1da1f2; }
+    .tweet-text { font-size: 1.1em; color: #1c1e21; line-height: 1.6; white-space: pre-wrap; margin-bottom: 15px; }
+    .tweet-img { width: 100%; border-radius: 10px; margin-top: 10px; border: 1px solid #eee; }
+    .status-bar { padding: 10px; border-radius: 10px; background: #fff; margin-bottom: 20px; border-left: 5px solid #1da1f2; text-align: center; }
     </style>
     """, unsafe_allow_html=True)
 
-st.title("✨ リアルタイム・バズ・タイムライン")
+st.title("📸 リアルタイム・画像付きバズ監視")
 
 # サイドバー
 st.sidebar.header("表示設定")
@@ -34,31 +36,38 @@ search_keyword = st.sidebar.text_input("検索コマンド", "の min_faves:1000
 update_interval = st.sidebar.slider("自動更新 (秒)", 30, 300, 60)
 
 def get_trends(keyword):
-    # Yahoo!リアルタイム検索
     url = f"https://search.yahoo.co.jp/realtime/search?p={keyword}"
     headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
     
     try:
         res = requests.get(url, headers=headers)
         soup = BeautifulSoup(res.text, "html.parser")
-        
         items = []
-        # 投稿全体を包む「section」や「article」をターゲットにする
-        posts = soup.find_all(["section", "div"], class_=lambda x: x and ("Tweet_body" in x or "Tweet_content" in x or "Comment_body" in x))
         
+        # 投稿のひとかたまり（article等）を取得
+        posts = soup.find_all(["article", "div"], class_=lambda x: x and "Tweet_body" in x)
+        
+        # クラス名で見つからない場合のバックアップ
         if not posts:
-            # 別のクラス名でも試行
-            posts = soup.select('div[class*="Tweet_body"], p[class*="Tweet_body"]')
+            posts = soup.select('li.Tweet')
 
-        for post in posts[:15]:
-            text = post.get_text().strip()
-            if len(text) > 10:
+        for post in posts[:10]:
+            # テキスト取得
+            text_elem = post.find(["p", "span"], class_=lambda x: x and "Tweet_body" in x)
+            text = text_elem.get_text() if text_elem else ""
+            
+            # 画像URLの取得（imgタグを探す）
+            img_tag = post.find("img", src=lambda x: x and ("twimg.com" in x or "yjimage" in x))
+            img_url = img_tag["src"] if img_tag else None
+
+            if len(text) > 5:
                 items.append({
-                    "時刻": datetime.now().strftime("%H:%M:%S"),
-                    "内容": text
+                    "時刻": datetime.now().strftime("%H:%M"),
+                    "内容": text,
+                    "画像": img_url
                 })
         return items
-    except Exception as e:
+    except:
         return []
 
 # 表示エリア
@@ -67,20 +76,20 @@ placeholder = st.empty()
 while True:
     with placeholder.container():
         posts_data = get_trends(search_keyword)
-        
-        st.markdown(f'<div class="status-bar">最終更新: {datetime.now().strftime("%H:%M:%S")} | 取得件数: {len(posts_data)}件</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="status-bar">最終更新: {datetime.now().strftime("%H:%M:%S")} | 注目投稿: {len(posts_data)}件</div>', unsafe_allow_html=True)
         
         if posts_data:
             for p in posts_data:
+                # HTML組み立て
+                img_html = f'<img src="{p["画像"]}" class="tweet-img">' if p["画像"] else ""
                 st.markdown(f"""
                 <div class="tweet-container">
-                    <div class="tweet-time">🕒 {p['時刻']} 取得</div>
+                    <div style="color: #657786; font-size: 0.8em; margin-bottom: 5px;">🕒 {p['時刻']}</div>
                     <div class="tweet-text">{p['内容']}</div>
+                    {img_html}
                 </div>
                 """, unsafe_allow_html=True)
         else:
-            st.error("現在、新しい投稿を取得できません。以下の理由が考えられます。")
-            st.write("1. 1000いいね以上の投稿が今この瞬間に発生していない（数字を 100 に下げてみてください）")
-            st.write("2. Yahoo!側で一時的なアクセス制限がかかっている（少し待つか、キーワードを変えてください）")
+            st.info("条件に合う投稿を探索中...")
             
     time.sleep(update_interval)
